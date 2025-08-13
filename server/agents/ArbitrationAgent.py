@@ -14,7 +14,7 @@ import os
 import json
 import logging
 
-class Arbitration_agent():
+class ArbitrationAgent():
     def decide_and_update_state(self, state: dict) -> dict:
         """
         Analyzes the query to determine the task type and updates the state.

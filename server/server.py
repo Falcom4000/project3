@@ -1,6 +1,4 @@
 from flask import Flask, request, jsonify
-from typing import Optional, Dict, Any, List, TypedDict
-from contextlib import AsyncExitStack
 from dotenv import load_dotenv
 from langgraph.graph import StateGraph, END
 import os
@@ -8,9 +6,10 @@ import configparser
 import logging
 
 # Import agent classes
-from Arbitration_agent import Arbitration_agent
-from QA_agent import QA_agent
-from Task_agent import Task_agent
+from agents.ArbitrationAgent import ArbitrationAgent
+from agents.ChatAgent import ChatAgent
+from agents.AgentState import AgentState
+from agents.TaskAgent import TaskAgent
 
 # Define base path to locate config and log files
 base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -35,13 +34,6 @@ logging.basicConfig(
     ]
 )
 # --- End Logging Setup ---
-
-# Define the state for our graph
-class AgentState(TypedDict):
-    query: str
-    response: str
-    next_node: str # Add key to store routing decision
-
 class Server():
     def __init__(self):
         self.app = Flask(__name__)
@@ -55,9 +47,9 @@ class Server():
         self.port = config.getint('server', 'port', fallback=5000)
 
         # Instantiate agents
-        self.arbitration_agent = Arbitration_agent()
-        self.qa_agent = QA_agent(config) # Pass config to agent
-        self.task_agent = Task_agent()
+        self.arbitration_agent = ArbitrationAgent()
+        self.qa_agent = ChatAgent(config) # Pass config to agent
+        self.task_agent = TaskAgent()
 
         # Build the graph
         self.graph = self._build_graph()
@@ -120,7 +112,5 @@ class Server():
         return jsonify({"text": response_text})
 
 if __name__ == '__main__':
-    server = Server()
-    server.run()
     server = Server()
     server.run()

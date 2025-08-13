@@ -1,6 +1,6 @@
 import logging
 
-class Task_agent():
+class TaskAgent():
     def _start_vehicle(self):
         """Placeholder function to start the vehicle."""
         logging.info("Executing: Start Vehicle")

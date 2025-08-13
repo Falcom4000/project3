@@ -3,7 +3,7 @@ from langchain_core.prompts import PromptTemplate
 import logging
 import configparser
 
-class QA_agent():
+class ChatAgent():
     def __init__(self, config: configparser.ConfigParser):
         base_url = config.get('agent', 'base_url', fallback=None)
         model = config.get('agent', 'model', fallback='gpt-3.5-turbo')
