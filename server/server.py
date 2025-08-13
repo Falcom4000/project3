@@ -1,9 +1,12 @@
 from flask import Flask, request, jsonify
 from dotenv import load_dotenv
 from langgraph.graph import StateGraph, END
+from langgraph.checkpoint.memory import InMemorySaver
 import os
 import configparser
 import logging
+import uuid # 导入 uuid 模块
+from langchain_core.messages import HumanMessage
 
 # Import agent classes
 from agents.ArbitrationAgent import ArbitrationAgent
@@ -38,7 +41,7 @@ class Server():
     def __init__(self):
         self.app = Flask(__name__)
         self.app.add_url_rule('/query', view_func=self.handle_query, methods=['POST'])
-        
+        self.memory = InMemorySaver()
         # Read configuration
         config = configparser.ConfigParser()
         config_path = os.path.join(config_dir, 'config.ini')
@@ -81,7 +84,7 @@ class Server():
         workflow.add_edge('qa_task', END)
         workflow.add_edge('vehicle_task', END)
 
-        return workflow.compile()
+        return workflow.compile(checkpointer=self.memory)
 
     def run(self):
         logging.info(f"Starting server on {self.host}:{self.port}")
@@ -89,7 +92,8 @@ class Server():
 
     def handle_query(self):
         """
-        Handles a query from the client by running it through the graph.
+        Handles a query from the client by running it through the graph,
+        maintaining conversation history via checkpointer.
         """
         data = request.get_json()
         if not data:
@@ -97,19 +101,33 @@ class Server():
             return jsonify({"error": "Request must be JSON"}), 400
 
         query = data.get('text')
+        # 从客户端获取 session_id，如果没有则创建一个新的
+        session_id = data.get('session_id', str(uuid.uuid4()))
+
         if not query:
             logging.error("Received JSON but missing 'text' field")
             return jsonify({"error": "Missing 'text' in request body"}), 400
         
-        logging.info(f"Received query: {query}")
-        # Run the query through the graph
-        inputs = {"query": query}
-        final_state = self.graph.invoke(inputs)
+        logging.info(f"Received query for session {session_id}: {query}")
 
+        # 为 LangGraph 的 checkpointer 设置配置
+        config = {"configurable": {"thread_id": session_id}}
+
+        # 关键改动：将输入包装成 HumanMessage 并放入 messages 列表
+        # AgentState 中的 'query' 字段也会被设置
+        inputs = {"messages": [HumanMessage(content=query)], "query": query}
+        
+        # 使用 config 调用图，LangGraph 会自动处理状态的保存和加载
+        # 它会将新的 HumanMessage 添加到历史记录中
+        final_state = self.graph.invoke(inputs, config=config)
+
+        # 从最终状态中获取响应
+        # 假设您的 ChatAgent 会将最终回复放入 'response' 字段
         response_text = final_state.get("response", "No response generated.")
-        logging.info(f"Sending response: {response_text}")
+        logging.info(f"Sending response for session {session_id}: {response_text}")
 
-        return jsonify({"text": response_text})
+        # 在响应中返回 session_id，以便客户端可以在下一轮请求中使用
+        return jsonify({"text": response_text, "session_id": session_id})
 
 if __name__ == '__main__':
     server = Server()
