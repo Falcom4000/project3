@@ -1,12 +1,14 @@
 from flask import Flask, request, jsonify
 from dotenv import load_dotenv
 from langgraph.graph import StateGraph, END
-from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.checkpoint.redis import RedisSaver
+from datetime import timedelta
 import os
 import configparser
 import logging
-import uuid # 导入 uuid 模块
+import uuid
 from langchain_core.messages import HumanMessage
+import redis # 导入 redis 库
 
 # Import agent classes
 from agents.ArbitrationAgent import ArbitrationAgent
@@ -39,19 +41,25 @@ logging.basicConfig(
 # --- End Logging Setup ---
 class Server():
     def __init__(self):
-        self.app = Flask(__name__)
-        self.app.add_url_rule('/query', view_func=self.handle_query, methods=['POST'])
-        self.memory = InMemorySaver()
         # Read configuration
         config = configparser.ConfigParser()
+        self.config = config
         config_path = os.path.join(config_dir, 'config.ini')
         config.read(config_path)
+        self.app = Flask(config.get('server', 'name', fallback=__name__))
+        self.app.add_url_rule('/query', view_func=self.handle_query, methods=['POST'])
+
+        self.checkpointer = None
+        with RedisSaver.from_conn_string(self.config.get('redis', 'connection_string', fallback='redis://localhost:6379/0')) as cp:
+            cp.setup()
+            self.checkpointer = cp
+
         self.host = config.get('server', 'host', fallback='0.0.0.0')
         self.port = config.getint('server', 'port', fallback=5000)
 
         # Instantiate agents
         self.arbitration_agent = ArbitrationAgent()
-        self.qa_agent = ChatAgent(config) # Pass config to agent
+        self.qa_agent = ChatAgent(config)
         self.task_agent = TaskAgent()
 
         # Build the graph
@@ -84,7 +92,8 @@ class Server():
         workflow.add_edge('qa_task', END)
         workflow.add_edge('vehicle_task', END)
 
-        return workflow.compile(checkpointer=self.memory)
+        # 关键修复：使用在 __init__ 中创建的 checkpointer 实例
+        return workflow.compile(checkpointer=self.checkpointer)
 
     def run(self):
         logging.info(f"Starting server on {self.host}:{self.port}")

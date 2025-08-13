@@ -1,0 +1,1 @@
+需要在docker环境中启动，需要redis-stack
