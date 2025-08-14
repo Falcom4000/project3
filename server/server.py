@@ -32,10 +32,9 @@ log_file_path = os.path.join(log_dir, 'server.log')
 
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    format='%(asctime)s - %(filename)s:%(lineno)d - %(levelname)s - %(message)s',
     handlers=[
         logging.FileHandler(log_file_path),
-        logging.StreamHandler()  # Also log to console
     ]
 )
 # --- End Logging Setup ---
@@ -60,7 +59,7 @@ class Server():
         # Instantiate agents
         self.arbitration_agent = ArbitrationAgent()
         self.qa_agent = ChatAgent(config)
-        self.task_agent = TaskAgent()
+        self.task_agent = TaskAgent(config)
 
         # Build the graph
         self.graph = self._build_graph()
@@ -91,8 +90,6 @@ class Server():
         # The specialist agents finish the process
         workflow.add_edge('qa_task', END)
         workflow.add_edge('vehicle_task', END)
-
-        # 关键修复：使用在 __init__ 中创建的 checkpointer 实例
         return workflow.compile(checkpointer=self.checkpointer)
 
     def run(self):
