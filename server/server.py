@@ -13,7 +13,8 @@ from langchain_core.messages import HumanMessage
 from agents.ArbitrationAgent import ArbitrationAgent
 from agents.ChatAgent import ChatAgent
 from agents.AgentState import AgentState
-from agents.TaskAgent import TaskAgent
+from agents.TaskAllocationAgent import TaskAllocationAgent
+from agents.ApproveAgent import ApproveAgent
 from agents.Tools import ToolsNode
 
 # Define base path to locate config and log files
@@ -59,8 +60,9 @@ class Server():
         # Instantiate agents
         self.arbitration_agent = ArbitrationAgent()
         self.qa_agent = ChatAgent(config)
-        self.task_agent = TaskAgent(config)
+        self.task_agent = TaskAllocationAgent(config)
         self.tool_node = ToolsNode
+        self.approval_agent = ApproveAgent()
 
         # Build the graph
         self.graph = self._build_graph()
@@ -75,6 +77,8 @@ class Server():
         workflow.add_node("qa_task", self.qa_agent.answer)
         workflow.add_node("vehicle_task", self.task_agent.execute)
         workflow.add_node("tools", self.tool_node.invoke)
+        workflow.add_node("approve", self.approval_agent.human_approval)
+
 
         # The entry point is the arbitration node
         workflow.set_entry_point("arbitration")
@@ -91,7 +95,9 @@ class Server():
 
         # The specialist agents finish the process
         workflow.add_edge('qa_task', END)
-        workflow.add_conditional_edges("vehicle_task", tools_condition, {"tools": "tools", "__end__": "__end__"})
+        workflow.add_conditional_edges("vehicle_task", tools_condition, {"tools": "approve", "__end__": "__end__"})
+        workflow.add_edge("approve", "tools")
+        workflow.add_edge("approve", END)
         return workflow.compile(checkpointer=self.checkpointer)
 
     def run(self):
@@ -99,25 +105,59 @@ class Server():
         self.app.run(host=self.host, port=self.port, debug=True)
 
     def handle_query(self):
-        """
-        Handles a query from the client by running it through the graph,
-        maintaining conversation history via checkpointer.
-        """
         data = request.get_json()
         if not data:
             logging.error("Received request without JSON body")
             return jsonify({"error": "Request must be JSON"}), 400
-        query = data.get('text')
+
         session_id = data.get('session_id', str(uuid.uuid4()))
-        if not query:
-            logging.error("Received JSON but missing 'text' field")
-            return jsonify({"error": "Missing 'text' in request body"}), 400
-        logging.info(f"Received query for session {session_id}: {query}")
         config = {"configurable": {"thread_id": session_id}}
-        inputs = {"messages": [HumanMessage(content=query)], "query": query}
-        final_state = self.graph.invoke(inputs, config=config)
+
+        # 判断是否是 resume 输入（人类审批等）
+        if 'resume' in data:
+            # resume 输入直接作为 Command 传给 graph
+            from langgraph.types import Command
+            resume_value = data['resume']
+            logging.info(f"Received resume input for session {session_id}: {resume_value}")
+            final_state = self.graph.invoke(Command(resume=resume_value), config=config)
+        else:
+            query = data.get('text')
+            if not query:
+                logging.error("Received JSON but missing 'text' field")
+                return jsonify({"error": "Missing 'text' in request body"}), 400
+            logging.info(f"Received query for session {session_id}: {query}")
+            inputs = {"messages": [HumanMessage(content=query)], "query": query}
+            final_state = self.graph.invoke(inputs, config=config)
+
+        # 检查是否需要人类输入
+        if '__interrupt__' in final_state:
+            interrupt_info = final_state['__interrupt__']
+            logging.info(f"Interrupt detected for session {session_id}: {interrupt_info}")
+            # 取第一个 Interrupt 对象
+            if isinstance(interrupt_info, list) and interrupt_info:
+                interrupt_obj = interrupt_info[0]
+                interrupt_value = getattr(interrupt_obj, "value", {})
+            else:
+                interrupt_value = interrupt_info if isinstance(interrupt_info, dict) else {}
+            question = interrupt_value.get('question', 'Please provide input for approval.')
+            function_calls = interrupt_value.get('function', [])
+            # 如果 function_calls 是列表，取第一个工具的 name 和 args
+            if function_calls and isinstance(function_calls, list):
+                function_name = function_calls[0].get('name', '')
+                function_args = function_calls[0].get('args', {})
+            else:
+                function_name = ''
+                function_args = {}
+            return jsonify({
+                "interrupt": True,
+                "question": question,
+                "function": function_name,
+                "args": function_args,
+                "session_id": session_id
+            })
+
         response_text = final_state.get("response", "No response generated.")
-        logging.info(f"Sending response for session {session_id}: {response_text}")
+        logging.info(f"Sending response for session {session_id}: {final_state}")
         return jsonify({"text": response_text, "session_id": session_id})
 
 if __name__ == '__main__':

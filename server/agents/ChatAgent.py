@@ -1,5 +1,4 @@
 from langchain_community.chat_models import ChatOpenAI
-from langchain_core.messages import AIMessage
 from .AgentState import AgentState
 import logging
 import configparser

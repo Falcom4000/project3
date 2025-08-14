@@ -2,7 +2,6 @@ import logging
 from langchain_core.tools import tool, Tool
 from langgraph.prebuilt import ToolNode
 
-
 @tool("start_vehicle")
 def start_vehicle() -> str:
     """启动车辆"""
