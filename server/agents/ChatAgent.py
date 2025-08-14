@@ -31,16 +31,9 @@ class ChatAgent():
         使用完整的对话历史来生成回答。
         """
         logging.info("Executing QA Agent with conversation history")
-        
-        # 从 state 中获取完整的消息历史
-        
         try:
-            # 直接将历史消息列表传递给模型
             response_message = self.chat_model.invoke({"query": state.get("query"),"messages": state.get('messages', [])})
             logging.info(f"ChatAgent Result: {response_message}")
-            # 返回一个字典来更新 state。
-            # 1. 将 AI 的回复（AIMessage 对象）添加到 messages 列表中，以便 LangGraph 保存
-            # 2. 将回复的文本内容放入 'response' 字段，以便 server.py 返回给客户端
             return {
                 "messages": [response_message],
                 "response": response_message.content
